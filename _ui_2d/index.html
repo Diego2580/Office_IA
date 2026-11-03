@@ -8,8 +8,8 @@
         #office-map { width: 800px; height: 400px; background-color: #2d2d2d; border: 2px solid #555; position: relative; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
         .desk { width: 120px; height: 70px; background-color: #8b4513; position: absolute; border-radius: 5px; border: 2px solid #5a2c0c; }
         .agent { width: 40px; height: 40px; border-radius: 50%; position: absolute; text-align: center; line-height: 40px; color: white; font-weight: bold; transition: all 0.2s ease-in-out; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
-        .architect { top: 120px; left: 155px; background-color: #4285F4; } /* Azul Google */
-        .developer { top: 120px; left: 555px; background-color: #F4B400; } /* Amarillo OpenRouter */
+        .architect { top: 120px; left: 155px; background-color: #4285F4; }
+        .developer { top: 120px; left: 555px; background-color: #F4B400; }
         #log-panel { width: 800px; height: 180px; background-color: #0c0c0c; margin-top: 15px; padding: 10px; overflow-y: auto; border: 1px solid #444; font-size: 14px; box-sizing: border-box; }
         .status-badge { position: absolute; top: 10px; right: 10px; background: red; color: white; padding: 5px 10px; border-radius: 12px; font-size: 12px; }
     </style>
@@ -18,10 +18,8 @@
     <h2>AI Office - Visualizador 2D</h2>
     <div id="office-map">
         <div id="connection-status" class="status-badge">Desconectado</div>
-        <!-- Escritorios -->
         <div class="desk" style="top: 170px; left: 115px;"></div>
         <div class="desk" style="top: 170px; left: 515px;"></div>
-        <!-- Agentes -->
         <div class="agent architect" id="agente-arquitecto">ARQ</div>
         <div class="agent developer" id="agente-desarrollador">DEV</div>
     </div>
@@ -37,30 +35,26 @@
         }
         
         log("Inicializando entorno gráfico...", "#888");
+        log("Conectando a ws://127.0.0.1:8000/ws/oficina ...", "#888");
         
-        // Conexión al servidor Python
-        const ws = new WebSocket("ws://localhost:8000/ws/oficina");
+        const ws = new WebSocket("ws://127.0.0.1:8000/ws/oficina");
         
         ws.onopen = () => {
-            log("Conectado al orquestador FastAPI exitosamente.", "#4285F4");
+            log("¡Conectado al orquestador (Arquitecto) exitosamente!", "#4285F4");
             statusBadge.innerText = "Conectado";
             statusBadge.style.backgroundColor = "green";
         };
         
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            log([]:  - );
-            
-            // Animación de salto cuando un agente trabaja
+            log("[" + data.agente + "]: " + data.accion + " - " + data.estado);
             let el = data.agente === "Orquestador" ? document.getElementById('agente-arquitecto') : document.getElementById('agente-desarrollador');
             el.style.transform = "translateY(-30px) scale(1.1)";
             setTimeout(() => el.style.transform = "translateY(0) scale(1)", 300);
         };
         
-        ws.onerror = () => {
-            log("Error de WebSocket. Asegúrate de ejecutar: python _core_orchestrator/server.py", "red");
-            statusBadge.innerText = "Error";
-            statusBadge.style.backgroundColor = "red";
+        ws.onerror = (error) => {
+            log("Error crítico. Presiona F12 y revisa la pestaña Console.", "red");
         };
         
         ws.onclose = () => {
