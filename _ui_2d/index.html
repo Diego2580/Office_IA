@@ -12,10 +12,14 @@
         .developer { top: 120px; left: 555px; background-color: #F4B400; }
         #log-panel { width: 800px; height: 180px; background-color: #0c0c0c; margin-top: 15px; padding: 10px; overflow-y: auto; border: 1px solid #444; font-size: 14px; box-sizing: border-box; }
         .status-badge { position: absolute; top: 10px; right: 10px; background: red; color: white; padding: 5px 10px; border-radius: 12px; font-size: 12px; }
+        #command-bar { width: 800px; display: flex; gap: 10px; margin-top: 10px; }
+        #prompt-input { flex: 1; padding: 12px; background: #0c0c0c; color: #00ff00; border: 1px solid #444; font-family: 'Courier New', monospace; font-size: 14px; outline: none; }
+        #btn-enviar { padding: 12px 24px; background: #4285F4; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        #btn-enviar:hover { background: #3367d6; }
     </style>
 </head>
 <body>
-    <h2>AI Office - Visualizador 2D</h2>
+    <h2>AI Office - Central de Comandos</h2>
     <div id="office-map">
         <div id="connection-status" class="status-badge">Desconectado</div>
         <div class="desk" style="top: 170px; left: 115px;"></div>
@@ -24,38 +28,54 @@
         <div class="agent developer" id="agente-desarrollador">DEV</div>
     </div>
     <div id="log-panel"></div>
+    <div id="command-bar">
+        <input type="text" id="prompt-input" placeholder="Escribe aquí tu orden para el Arquitecto..." autocomplete="off">
+        <button id="btn-enviar">EJECUTAR</button>
+    </div>
 
     <script>
         const logPanel = document.getElementById('log-panel');
         const statusBadge = document.getElementById('connection-status');
+        const btnEnviar = document.getElementById('btn-enviar');
+        const inputPrompt = document.getElementById('prompt-input');
         
         function log(msg, color = "#00ff00") { 
-            logPanel.innerHTML += '<div style="color:' + color + '">> ' + msg + '</div>'; 
+            logPanel.innerHTML += '<div style="color:' + color + '; padding: 2px 0;">> ' + msg + '</div>'; 
             logPanel.scrollTop = logPanel.scrollHeight; 
         }
         
-        log("Inicializando entorno gráfico...", "#888");
-        log("Conectando a ws://127.0.0.1:8000/ws/oficina ...", "#888");
-        
+        log("Conectando a la red de la Oficina...", "#888");
         const ws = new WebSocket("ws://127.0.0.1:8000/ws/oficina");
         
         ws.onopen = () => {
-            log("¡Conectado al orquestador (Arquitecto) exitosamente!", "#4285F4");
+            log("¡Conectado! Interfaz lista.", "#4285F4");
             statusBadge.innerText = "Conectado";
             statusBadge.style.backgroundColor = "green";
         };
         
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            if (data.origen === "usuario") return; // Ignora nuestro propio mensaje
+            
             log("[" + data.agente + "]: " + data.accion + " - " + data.estado);
             let el = data.agente === "Orquestador" ? document.getElementById('agente-arquitecto') : document.getElementById('agente-desarrollador');
-            el.style.transform = "translateY(-30px) scale(1.1)";
-            setTimeout(() => el.style.transform = "translateY(0) scale(1)", 300);
+            if (el) {
+                el.style.transform = "translateY(-30px) scale(1.1)";
+                setTimeout(() => el.style.transform = "translateY(0) scale(1)", 300);
+            }
         };
-        
-        ws.onerror = (error) => {
-            log("Error crítico. Presiona F12 y revisa la pestaña Console.", "red");
+
+        const enviarComando = () => {
+            const texto = inputPrompt.value.trim();
+            if(texto !== "") {
+                log("TÚ: " + texto, "#fff");
+                ws.send(JSON.stringify({origen: "usuario", texto: texto}));
+                inputPrompt.value = "";
+            }
         };
+
+        btnEnviar.onclick = enviarComando;
+        inputPrompt.onkeypress = (e) => { if(e.key === 'Enter') enviarComando(); };
         
         ws.onclose = () => {
             statusBadge.innerText = "Desconectado";
