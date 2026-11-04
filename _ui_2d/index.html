@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AI Office - Agency</title>
+    <title>AI Office - Vibecoding Agency</title>
     <style>
         body { background-color: #1e1e1e; color: #00ff00; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
         #office-map { width: 950px; height: 350px; background-color: #2d2d2d; border: 2px solid #555; position: relative; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
@@ -10,13 +10,15 @@
         .agent { width: 40px; height: 40px; border-radius: 50%; position: absolute; text-align: center; line-height: 40px; color: white; font-weight: bold; transition: transform 0.3s; box-shadow: 0 4px 8px rgba(0,0,0,0.3); font-size: 12px; }
         #log-panel { width: 950px; height: 180px; background-color: #0c0c0c; margin-top: 15px; padding: 10px; overflow-y: auto; border: 1px solid #444; font-size: 14px; box-sizing: border-box; }
         #command-bar { width: 950px; display: flex; gap: 10px; margin-top: 10px; }
-        input { flex: 1; padding: 12px; background: #0c0c0c; color: #00ff00; border: 1px solid #444; font-family: inherit; }
-        button { padding: 12px 24px; background: #4285F4; color: white; border: none; font-weight: bold; cursor: pointer; }
+        input[type="text"] { flex: 1; padding: 12px; background: #0c0c0c; color: #00ff00; border: 1px solid #444; font-family: inherit; }
+        button, .btn-file { padding: 12px 24px; background: #4285F4; color: white; border: none; font-weight: bold; cursor: pointer; text-align: center; }
+        .btn-file { background: #9C27B0; }
         .status-badge { position: absolute; top: 10px; right: 10px; background: red; color: white; padding: 5px 10px; border-radius: 12px; font-size: 12px; }
+        #preview-img { max-height: 40px; display: none; margin-left: 10px; }
     </style>
 </head>
 <body>
-    <h2>AI Office - Agencia Completa</h2>
+    <h2>AI Office - Vibecoding Agency</h2>
     <div id="office-map">
         <div id="connection-status" class="status-badge">Desconectado</div>
         <div class="desk" style="top: 150px; left: 50px;"></div><div class="agent" id="agente-ARQ" style="top: 100px; left: 80px; background: #4285F4;">ARQ</div>
@@ -27,23 +29,38 @@
     </div>
     <div id="log-panel"></div>
     <div id="command-bar">
-        <input type="text" id="prompt-input" placeholder="Orden maestra..." autocomplete="off">
+        <label class="btn-file">
+            📷 Adjuntar
+            <input type="file" id="file-input" accept="image/*" style="display: none;">
+        </label>
+        <img id="preview-img" src="" alt="Preview">
+        <input type="text" id="prompt-input" placeholder="Orden maestra (Vibecoding)..." autocomplete="off">
         <button id="btn-enviar">EJECUTAR</button>
     </div>
     <script>
         const logPanel = document.getElementById('log-panel'), inputPrompt = document.getElementById('prompt-input'), statusBadge = document.getElementById('connection-status');
+        const fileInput = document.getElementById('file-input'), previewImg = document.getElementById('preview-img');
+        let currentImageBase64 = null;
+
+        fileInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if(file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    currentImageBase64 = e.target.result;
+                    previewImg.src = currentImageBase64;
+                    previewImg.style.display = 'block';
+                    log("Imagen cargada y lista para analizar.", "#E91E63");
+                };
+                reader.readAsDataURL(file);
+            }
+        });
         
         function log(msg, color="#00ff00") { logPanel.innerHTML += `<div style="color:${color}">> ${msg}</div>`; logPanel.scrollTop = logPanel.scrollHeight; }
         
         function conectarWS() {
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/oficina");
-            
-            ws.onopen = () => {
-                log("¡Conectado a la Agencia!", "#4285F4");
-                statusBadge.innerText = "Conectado";
-                statusBadge.style.background = "green";
-            };
-            
+            ws.onopen = () => { log("¡Conectado a la Agencia!", "#4285F4"); statusBadge.innerText = "Conectado"; statusBadge.style.background = "green"; };
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.origen === "usuario") return;
@@ -51,18 +68,15 @@
                 let el = document.getElementById('agente-' + data.agente);
                 if (el) { el.style.transform = "translateY(-20px)"; setTimeout(() => el.style.transform = "translateY(0)", 300); }
             };
-
-            ws.onclose = () => {
-                statusBadge.innerText = "Desconectado";
-                statusBadge.style.background = "red";
-                setTimeout(conectarWS, 3000); 
-            };
+            ws.onclose = () => { statusBadge.innerText = "Desconectado"; statusBadge.style.background = "red"; setTimeout(conectarWS, 3000); };
 
             const enviar = () => {
-                if(inputPrompt.value.trim()) {
-                    log("TÚ: " + inputPrompt.value, "#fff");
-                    ws.send(JSON.stringify({origen: "usuario", texto: inputPrompt.value}));
-                    inputPrompt.value = "";
+                if(inputPrompt.value.trim() || currentImageBase64) {
+                    log("TÚ: " + (inputPrompt.value || "Analiza esta imagen"), "#fff");
+                    const payload = { origen: "usuario", texto: inputPrompt.value || "Analiza detalladamente esta imagen y escribe el código para replicarla." };
+                    if (currentImageBase64) { payload.imagen = currentImageBase64; }
+                    ws.send(JSON.stringify(payload));
+                    inputPrompt.value = ""; currentImageBase64 = null; previewImg.style.display = 'none'; fileInput.value = "";
                 }
             };
             document.getElementById('btn-enviar').onclick = enviar;

@@ -6,130 +6,111 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.checkpoint.memory import MemorySaver
 from main import obtener_arquitecto, obtener_desarrollador
-from tools import leer_archivo, escribir_archivo, listar_directorio, abrir_archivo
+from tools import leer_archivo, escribir_archivo, listar_directorio, abrir_archivo, explorar_web
 
 class EstadoOficina(TypedDict): messages: Annotated[Sequence[BaseMessage], operator.add]
 
 arq_llm = obtener_arquitecto()
 dev_llm = obtener_desarrollador()
-herramientas = [leer_archivo, escribir_archivo, listar_directorio, abrir_archivo]
+herramientas = [leer_archivo, escribir_archivo, listar_directorio, abrir_archivo, explorar_web]
 sec_con_herramientas = dev_llm.bind_tools(herramientas)
 
 def notificar(agente, accion, estado):
     try:
-        with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
-            ws.send(json.dumps({"agente": agente, "accion": accion, "estado": estado}))
+        with connect("ws://127.0.0.1:8000/ws/oficina") as ws: ws.send(json.dumps({"agente": agente, "accion": accion, "estado": estado}))
         time.sleep(0.5)
     except: pass
 
 def procesar_agente(rol, state, llm, prompt):
     print(f"\n[{rol}]: Operando...")
-    notificar(rol, "Analizando", "Procesando")
-    ruta = os.getcwd().replace('\\', '/')
-    mensajes = [SystemMessage(content=f"{prompt} Ruta base: {ruta}")] + state['messages']
-    
-    for intento in range(4):
+    notificar(rol, "Analizando", "Vibecoding...")
+    mensajes = [SystemMessage(content=f"{prompt} Ruta base: {os.getcwd()}")] + state['messages']
+    for intento in range(3):
         try:
             res = llm.invoke(mensajes)
-            notificar(rol, "Terminado", "Avanzando")
-            time.sleep(1.5)
+            notificar(rol, "Terminado", "Listo")
+            time.sleep(1)
             return {"messages": [res]}
         except Exception:
-            notificar(rol, "Reintentando", "Esquivando bloqueo de red")
-            time.sleep(4)
-    return {"messages": [AIMessage(content="Omitido por error de API.")]}
+            notificar(rol, "Reintentando", "Esquivando red")
+            time.sleep(3)
+    return {"messages": [AIMessage(content="Error API.")]}
 
 def nodo_arq(state):
-    print("\n[ARQ]: Evaluando y Enrutando...")
-    notificar("ARQ", "Enrutador", "Decidiendo flujo")
-    prompt = """Eres el Arquitecto Supervisor. Analiza la peticion.
-    Si requiere diseño/UI o crear paginas, empieza con [RUTA: UI].
-    Si requiere solo backend, empieza con [RUTA: DEV].
-    Si es solo guardar texto, empieza con [RUTA: SEC]."""
+    notificar("ARQ", "Enrutador", "Evaluando")
+    prompt = """Eres Arquitecto Jefe operando bajo VIBECODING. Cero SDD, cero burocracia. Iteramos rápido.
+    - Si dan URL o piden analizar estructura/ingeniería inversa: [RUTA: DEV]
+    - Si suben IMAGEN o piden UI/diseño: [RUTA: UI]
+    - Si solo piden abrir, guardar o leer algo puntual: [RUTA: SEC]"""
     return procesar_agente("ARQ", state, arq_llm, prompt)
 
 def enrutador(state):
-    ultimo_mensaje = state['messages'][-1].content.upper()
-    if "[RUTA: UI]" in ultimo_mensaje: return "UI"
-    if "[RUTA: DEV]" in ultimo_mensaje: return "DEV"
-    if "[RUTA: SEC]" in ultimo_mensaje: return "SEC"
-    return "UI"
+    msg = state['messages'][-1].content.upper()
+    if "[RUTA: UI]" in msg: return "UI"
+    if "[RUTA: DEV]" in msg: return "DEV"
+    return "SEC"
 
-def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX. Define el diseño web en texto.")
-def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. Escribe todo el codigo fuente dentro de bloques ```html ... ```")
-def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "Eres QA. Aprueba el codigo brevemente.")
+def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Diseñador UI/UX experto en Vibecoding. Si te pasan imagen, clónala pixel-perfect en código moderno.")
+def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Desarrollador FullStack (Vibecoding). Escribe código completo y funcional en bloques ```lenguaje ... ```. Usa herramientas web si hay URLs.")
+def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "QA rapido. Aprueba con 'OK' o arregla el codigo si hay error obvio.")
 
 def nodo_sec(state):
-    print("\n[SEC]: Verificando y guardando...")
-    notificar("SEC", "Auditoria", "Extrayendo codigo puro")
+    notificar("SEC", "Sistema", "Ejecutando IO")
+    prompt_usuario = state['messages'][0].content.lower() if isinstance(state['messages'][0].content, str) else str(state['messages'][0].content).lower()
     
     res = AIMessage(content="Fallback", tool_calls=[])
-    for intento in range(3):
+    for _ in range(2):
         try:
-            res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo y abrir_archivo.")] + state['messages'])
+            res = sec_con_herramientas.invoke([SystemMessage(content="Ejecuta herramientas OBLIGATORIO.")] + state['messages'])
             break
-        except Exception:
-            time.sleep(3)
+        except: time.sleep(2)
     
     if not hasattr(res, 'tool_calls') or not res.tool_calls:
-        prompt_usuario = state['messages'][0].content
-        rutas = re.findall(r'[a-zA-Z]:\\[^\s"\'<>]+', prompt_usuario)
+        llamadas = []
+        texto_hist = " ".join([m.content if isinstance(m.content, str) else "" for m in state['messages']])
+        rutas = re.findall(r'[a-zA-Z]:\\[^\s"\'<>]+', texto_hist)
         ruta_final = rutas[0] if rutas else os.path.join(os.getcwd(), "resultado.html")
-        if not '.' in ruta_final.split('\\')[-1]:
-            ruta_final = os.path.join(ruta_final, "index.html")
-            
-        codigo_final = ""
-        for msg in reversed(state['messages']):
-            bloque = re.search(r'```(?:html|css|js|javascript|python)?\s*(.*?)```', msg.content, re.DOTALL | re.IGNORECASE)
-            if bloque:
-                codigo_final = bloque.group(1).strip()
-                break
-        if not codigo_final: codigo_final = state['messages'][-1].content
         
-        llamadas_herramientas = [{"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo_final}, "id": "hack_w"}]
-        
-        # Evaluar si el usuario pidio abrir el archivo
-        if "abrelo" in prompt_usuario.lower() or "abrir" in prompt_usuario.lower():
-            llamadas_herramientas.append({"name": "abrir_archivo", "args": {"ruta": ruta_final}, "id": "hack_o"})
-            
-        res = AIMessage(content="Acciones completadas.", tool_calls=llamadas_herramientas)
-        notificar("SEC", "Herramientas", "Guardando y abriendo")
-    else:
-        notificar("SEC", "Herramienta", res.tool_calls[0]['name'])
-        
+        if "abre" in prompt_usuario: llamadas.append({"name": "abrir_archivo", "args": {"ruta": ruta_final}, "id": "hk_o"})
+        else:
+            codigo_final = ""
+            for msg in reversed(state['messages']):
+                bloque = re.search(r'```[a-z]*\n(.*?)```', msg.content if isinstance(msg.content, str) else "", re.DOTALL | re.IGNORECASE)
+                if bloque:
+                    codigo_final = bloque.group(1).strip()
+                    break
+            if codigo_final: 
+                llamadas.append({"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo_final}, "id": "hk_w"})
+                if "abre" in prompt_usuario: llamadas.append({"name": "abrir_archivo", "args": {"ruta": ruta_final}, "id": "hk_o2"})
+        res = AIMessage(content="Vibecoding Action", tool_calls=llamadas)
+    
     return {"messages": [res]}
 
-flujo = StateGraph(EstadoOficina)
-flujo.add_node("ARQ", nodo_arq)
-flujo.add_node("UI", nodo_ui)
-flujo.add_node("DEV", nodo_dev)
-flujo.add_node("QA", nodo_qa)
-flujo.add_node("SEC", nodo_sec)
-flujo.add_node("herramientas", ToolNode(herramientas))
-
-flujo.add_edge(START, "ARQ")
-flujo.add_conditional_edges("ARQ", enrutador, {"UI": "UI", "DEV": "DEV", "SEC": "SEC"})
-flujo.add_edge("UI", "DEV")
-flujo.add_edge("DEV", "QA")
-flujo.add_edge("QA", "SEC")
-flujo.add_conditional_edges("SEC", tools_condition, {"tools": "herramientas", END: END})
-flujo.add_edge("herramientas", END)
-
-app = flujo.compile()
+app = StateGraph(EstadoOficina)
+app.add_node("ARQ", nodo_arq); app.add_node("UI", nodo_ui); app.add_node("DEV", nodo_dev); app.add_node("QA", nodo_qa); app.add_node("SEC", nodo_sec); app.add_node("herramientas", ToolNode(herramientas))
+app.add_edge(START, "ARQ"); app.add_conditional_edges("ARQ", enrutador, {"UI": "UI", "DEV": "DEV", "SEC": "SEC"})
+app.add_edge("UI", "DEV"); app.add_edge("DEV", "QA"); app.add_edge("QA", "SEC")
+app.add_conditional_edges("SEC", tools_condition, {"tools": "herramientas", END: END}); app.add_edge("herramientas", END)
+motor = app.compile(checkpointer=MemorySaver())
 
 if __name__ == '__main__':
     while True:
         try:
             with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
-                print(" -> Escuchando en localhost:8030...")
-                notificar("ARQ", "Sistema en linea", "Esperando tu orden")
+                print(" -> Agencia Multimodal y Vibecoding Lista...")
                 while True:
                     data = json.loads(ws.recv())
                     if data.get("origen") == "usuario":
-                        for salida in app.stream({"messages": [HumanMessage(content=data["texto"])]}):
-                            if "herramientas" in salida: 
-                                print(f"  [SO]: Acciones ejecutadas en disco.")
-                        notificar("ARQ", "Tarea finalizada", "Listo")
-        except Exception as e:
-            time.sleep(3)
+                        # Armar mensaje Multimodal si hay imagen
+                        content = []
+                        if data.get("texto"): content.append({"type": "text", "text": data["texto"]})
+                        if data.get("imagen"): content.append({"type": "image_url", "image_url": {"url": data["imagen"]}})
+                        if not content: continue
+                        
+                        config = {"configurable": {"thread_id": "vibecoding_session_1"}}
+                        for salida in motor.stream({"messages": [HumanMessage(content=content)]}, config=config):
+                            pass
+                        notificar("ARQ", "Completado", "Siguiente orden")
+        except: time.sleep(3)
