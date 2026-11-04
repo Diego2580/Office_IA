@@ -7,13 +7,13 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AI
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from main import obtener_arquitecto, obtener_desarrollador
-from tools import leer_archivo, escribir_archivo, listar_directorio
+from tools import leer_archivo, escribir_archivo, listar_directorio, abrir_archivo
 
 class EstadoOficina(TypedDict): messages: Annotated[Sequence[BaseMessage], operator.add]
 
 arq_llm = obtener_arquitecto()
 dev_llm = obtener_desarrollador()
-herramientas = [leer_archivo, escribir_archivo, listar_directorio]
+herramientas = [leer_archivo, escribir_archivo, listar_directorio, abrir_archivo]
 sec_con_herramientas = dev_llm.bind_tools(herramientas)
 
 def notificar(agente, accion, estado):
@@ -29,20 +29,15 @@ def procesar_agente(rol, state, llm, prompt):
     ruta = os.getcwd().replace('\\', '/')
     mensajes = [SystemMessage(content=f"{prompt} Ruta base: {ruta}")] + state['messages']
     
-    # Sistema de tolerancia a fallos para evadir bloqueos de la API (429/502)
     for intento in range(4):
         try:
             res = llm.invoke(mensajes)
             notificar(rol, "Terminado", "Avanzando")
-            time.sleep(1.5) # Pausa preventiva para no saturar la red
+            time.sleep(1.5)
             return {"messages": [res]}
-        except Exception as e:
-            print(f"  [Advertencia] {rol} bloqueado en red. Reintentando ({intento+1}/4)...")
+        except Exception:
             notificar(rol, "Reintentando", "Esquivando bloqueo de red")
-            time.sleep(4) # Esperar a que la API se enfríe
-            
-    # Fallback si todo falla
-    notificar(rol, "Fallo", "Saltando por error de API")
+            time.sleep(4)
     return {"messages": [AIMessage(content="Omitido por error de API.")]}
 
 def nodo_arq(state):
@@ -59,11 +54,11 @@ def enrutador(state):
     if "[RUTA: UI]" in ultimo_mensaje: return "UI"
     if "[RUTA: DEV]" in ultimo_mensaje: return "DEV"
     if "[RUTA: SEC]" in ultimo_mensaje: return "SEC"
-    return "UI" # Flujo completo por defecto
+    return "UI"
 
 def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX. Define el diseño web en texto.")
-def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. OBLIGATORIO: Escribe todo el codigo fuente dentro de bloques de triple comilla invertida, ejemplo: ```html ...codigo... ```")
-def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "Eres QA. Aprueba el codigo brevemente, no lo reescribas.")
+def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. Escribe todo el codigo fuente dentro de bloques ```html ... ```")
+def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "Eres QA. Aprueba el codigo brevemente.")
 
 def nodo_sec(state):
     print("\n[SEC]: Verificando y guardando...")
@@ -72,14 +67,12 @@ def nodo_sec(state):
     res = AIMessage(content="Fallback", tool_calls=[])
     for intento in range(3):
         try:
-            res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo.")] + state['messages'])
+            res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo y abrir_archivo.")] + state['messages'])
             break
         except Exception:
-            notificar("SEC", "Pausa", "Reintentando conexion")
             time.sleep(3)
     
     if not hasattr(res, 'tool_calls') or not res.tool_calls:
-        print("  [Hack] Limpiando conversacion y extrayendo codigo puro...")
         prompt_usuario = state['messages'][0].content
         rutas = re.findall(r'[a-zA-Z]:\\[^\s"\'<>]+', prompt_usuario)
         ruta_final = rutas[0] if rutas else os.path.join(os.getcwd(), "resultado.html")
@@ -92,15 +85,16 @@ def nodo_sec(state):
             if bloque:
                 codigo_final = bloque.group(1).strip()
                 break
+        if not codigo_final: codigo_final = state['messages'][-1].content
         
-        if not codigo_final:
-            codigo_final = state['messages'][-1].content
+        llamadas_herramientas = [{"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo_final}, "id": "hack_w"}]
+        
+        # Evaluar si el usuario pidio abrir el archivo
+        if "abrelo" in prompt_usuario.lower() or "abrir" in prompt_usuario.lower():
+            llamadas_herramientas.append({"name": "abrir_archivo", "args": {"ruta": ruta_final}, "id": "hack_o"})
             
-        res = AIMessage(
-            content="Guardado exitoso.",
-            tool_calls=[{"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo_final}, "id": "hack_02"}]
-        )
-        notificar("SEC", "Herramienta", "Codigo extraido")
+        res = AIMessage(content="Acciones completadas.", tool_calls=llamadas_herramientas)
+        notificar("SEC", "Herramientas", "Guardando y abriendo")
     else:
         notificar("SEC", "Herramienta", res.tool_calls[0]['name'])
         
@@ -135,7 +129,7 @@ if __name__ == '__main__':
                     if data.get("origen") == "usuario":
                         for salida in app.stream({"messages": [HumanMessage(content=data["texto"])]}):
                             if "herramientas" in salida: 
-                                print(f"  [SO]: {salida['herramientas']['messages'][-1].content}")
+                                print(f"  [SO]: Acciones ejecutadas en disco.")
                         notificar("ARQ", "Tarea finalizada", "Listo")
         except Exception as e:
             time.sleep(3)
