@@ -27,9 +27,23 @@ def procesar_agente(rol, state, llm, prompt):
     print(f"\n[{rol}]: Operando...")
     notificar(rol, "Analizando", "Procesando")
     ruta = os.getcwd().replace('\\', '/')
-    res = llm.invoke([SystemMessage(content=f"{prompt} Ruta base: {ruta}")] + state['messages'])
-    notificar(rol, "Terminado", "Avanzando")
-    return {"messages": [res]}
+    mensajes = [SystemMessage(content=f"{prompt} Ruta base: {ruta}")] + state['messages']
+    
+    # Sistema de tolerancia a fallos para evadir bloqueos de la API (429/502)
+    for intento in range(4):
+        try:
+            res = llm.invoke(mensajes)
+            notificar(rol, "Terminado", "Avanzando")
+            time.sleep(1.5) # Pausa preventiva para no saturar la red
+            return {"messages": [res]}
+        except Exception as e:
+            print(f"  [Advertencia] {rol} bloqueado en red. Reintentando ({intento+1}/4)...")
+            notificar(rol, "Reintentando", "Esquivando bloqueo de red")
+            time.sleep(4) # Esperar a que la API se enfríe
+            
+    # Fallback si todo falla
+    notificar(rol, "Fallo", "Saltando por error de API")
+    return {"messages": [AIMessage(content="Omitido por error de API.")]}
 
 def nodo_arq(state):
     print("\n[ARQ]: Evaluando y Enrutando...")
@@ -38,15 +52,14 @@ def nodo_arq(state):
     Si requiere diseño/UI o crear paginas, empieza con [RUTA: UI].
     Si requiere solo backend, empieza con [RUTA: DEV].
     Si es solo guardar texto, empieza con [RUTA: SEC]."""
-    res = arq_llm.invoke([SystemMessage(content=prompt)] + state['messages'])
-    return {"messages": [res]}
+    return procesar_agente("ARQ", state, arq_llm, prompt)
 
 def enrutador(state):
     ultimo_mensaje = state['messages'][-1].content.upper()
     if "[RUTA: UI]" in ultimo_mensaje: return "UI"
     if "[RUTA: DEV]" in ultimo_mensaje: return "DEV"
     if "[RUTA: SEC]" in ultimo_mensaje: return "SEC"
-    return "DEV"
+    return "UI" # Flujo completo por defecto
 
 def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX. Define el diseño web en texto.")
 def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. OBLIGATORIO: Escribe todo el codigo fuente dentro de bloques de triple comilla invertida, ejemplo: ```html ...codigo... ```")
@@ -56,18 +69,23 @@ def nodo_sec(state):
     print("\n[SEC]: Verificando y guardando...")
     notificar("SEC", "Auditoria", "Extrayendo codigo puro")
     
-    res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo.")] + state['messages'])
+    res = AIMessage(content="Fallback", tool_calls=[])
+    for intento in range(3):
+        try:
+            res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo.")] + state['messages'])
+            break
+        except Exception:
+            notificar("SEC", "Pausa", "Reintentando conexion")
+            time.sleep(3)
     
-    if not res.tool_calls:
+    if not hasattr(res, 'tool_calls') or not res.tool_calls:
         print("  [Hack] Limpiando conversacion y extrayendo codigo puro...")
         prompt_usuario = state['messages'][0].content
-        
         rutas = re.findall(r'[a-zA-Z]:\\[^\s"\'<>]+', prompt_usuario)
         ruta_final = rutas[0] if rutas else os.path.join(os.getcwd(), "resultado.html")
         if not '.' in ruta_final.split('\\')[-1]:
             ruta_final = os.path.join(ruta_final, "index.html")
             
-        # Buscar en el historial el bloque de codigo puro
         codigo_final = ""
         for msg in reversed(state['messages']):
             bloque = re.search(r'```(?:html|css|js|javascript|python)?\s*(.*?)```', msg.content, re.DOTALL | re.IGNORECASE)
@@ -75,7 +93,6 @@ def nodo_sec(state):
                 codigo_final = bloque.group(1).strip()
                 break
         
-        # Fallback si olvidaron usar las triple comillas
         if not codigo_final:
             codigo_final = state['messages'][-1].content
             
