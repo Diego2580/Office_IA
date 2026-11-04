@@ -34,10 +34,10 @@ def procesar_agente(rol, state, llm, prompt):
 def nodo_arq(state):
     print("\n[ARQ]: Evaluando y Enrutando...")
     notificar("ARQ", "Enrutador", "Decidiendo flujo")
-    prompt = """Eres el Arquitecto Supervisor. Analiza la petición.
-    Si requiere diseño/UI, empieza exactamente con [RUTA: UI].
-    Si requiere código backend, empieza con [RUTA: DEV].
-    Si es guardar archivo, empieza con [RUTA: SEC]."""
+    prompt = """Eres el Arquitecto Supervisor. Analiza la peticion.
+    Si requiere diseño/UI o crear paginas, empieza con [RUTA: UI].
+    Si requiere solo backend, empieza con [RUTA: DEV].
+    Si es solo guardar texto, empieza con [RUTA: SEC]."""
     res = arq_llm.invoke([SystemMessage(content=prompt)] + state['messages'])
     return {"messages": [res]}
 
@@ -48,35 +48,42 @@ def enrutador(state):
     if "[RUTA: SEC]" in ultimo_mensaje: return "SEC"
     return "DEV"
 
-def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX.")
-def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador de software.")
-def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "Eres QA. Busca bugs, no uses herramientas.")
+def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX. Define el diseño web en texto.")
+def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. OBLIGATORIO: Escribe todo el codigo fuente dentro de bloques de triple comilla invertida, ejemplo: ```html ...codigo... ```")
+def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "Eres QA. Aprueba el codigo brevemente, no lo reescribas.")
 
 def nodo_sec(state):
     print("\n[SEC]: Verificando y guardando...")
-    notificar("SEC", "Auditoria", "Guardando a disco")
+    notificar("SEC", "Auditoria", "Extrayendo codigo puro")
     
-    res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo de inmediato.")] + state['messages'])
+    res = sec_con_herramientas.invoke([SystemMessage(content="Usa escribir_archivo.")] + state['messages'])
     
-    # Interceptor para modelos gratuitos que fallan al invocar herramientas
     if not res.tool_calls:
-        print("  [Hack] Modelo gratuito no uso tool. Inyectando herramienta forzada...")
+        print("  [Hack] Limpiando conversacion y extrayendo codigo puro...")
         prompt_usuario = state['messages'][0].content
         
-        # Extraer ruta absoluta de Windows (Ej: C:\Users\...)
         rutas = re.findall(r'[a-zA-Z]:\\[^\s"\'<>]+', prompt_usuario)
         ruta_final = rutas[0] if rutas else os.path.join(os.getcwd(), "resultado.html")
-        
-        # Si la ruta no termina en extensión, asumimos que es carpeta y añadimos index.html
         if not '.' in ruta_final.split('\\')[-1]:
             ruta_final = os.path.join(ruta_final, "index.html")
             
-        codigo = state['messages'][-1].content
+        # Buscar en el historial el bloque de codigo puro
+        codigo_final = ""
+        for msg in reversed(state['messages']):
+            bloque = re.search(r'```(?:html|css|js|javascript|python)?\s*(.*?)```', msg.content, re.DOTALL | re.IGNORECASE)
+            if bloque:
+                codigo_final = bloque.group(1).strip()
+                break
+        
+        # Fallback si olvidaron usar las triple comillas
+        if not codigo_final:
+            codigo_final = state['messages'][-1].content
+            
         res = AIMessage(
-            content="Guardado de emergencia.",
-            tool_calls=[{"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo}, "id": "hack_01"}]
+            content="Guardado exitoso.",
+            tool_calls=[{"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo_final}, "id": "hack_02"}]
         )
-        notificar("SEC", "Herramienta (Forzada)", "escribir_archivo")
+        notificar("SEC", "Herramienta", "Codigo extraido")
     else:
         notificar("SEC", "Herramienta", res.tool_calls[0]['name'])
         
@@ -112,8 +119,6 @@ if __name__ == '__main__':
                         for salida in app.stream({"messages": [HumanMessage(content=data["texto"])]}):
                             if "herramientas" in salida: 
                                 print(f"  [SO]: {salida['herramientas']['messages'][-1].content}")
-                        notificar("ARQ", "Tarea finalizada", "Listo para la siguiente orden")
+                        notificar("ARQ", "Tarea finalizada", "Listo")
         except Exception as e:
-            print(f"\n  [ERROR DE RED O API]: {e}")
-            print("  Reconectando en 3 segundos...")
             time.sleep(3)
