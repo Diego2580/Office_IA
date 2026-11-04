@@ -41,6 +41,7 @@
         const logPanel = document.getElementById('log-panel'), inputPrompt = document.getElementById('prompt-input'), statusBadge = document.getElementById('connection-status');
         const fileInput = document.getElementById('file-input'), previewImg = document.getElementById('preview-img');
         let currentImageBase64 = null;
+        let conexionPerdida = false;
 
         fileInput.addEventListener('change', function() {
             const file = this.files[0];
@@ -60,7 +61,15 @@
         
         function conectarWS() {
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/oficina");
-            ws.onopen = () => { log("¡Conectado a la Agencia!", "#4285F4"); statusBadge.innerText = "Conectado"; statusBadge.style.background = "green"; };
+            ws.onopen = () => { 
+                if (conexionPerdida) {
+                    window.location.reload();
+                    return;
+                }
+                log("¡Conectado a la Agencia!", "#4285F4"); 
+                statusBadge.innerText = "Conectado"; 
+                statusBadge.style.background = "green"; 
+            };
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.origen === "usuario") return;
@@ -68,7 +77,12 @@
                 let el = document.getElementById('agente-' + data.agente);
                 if (el) { el.style.transform = "translateY(-20px)"; setTimeout(() => el.style.transform = "translateY(0)", 300); }
             };
-            ws.onclose = () => { statusBadge.innerText = "Desconectado"; statusBadge.style.background = "red"; setTimeout(conectarWS, 3000); };
+            ws.onclose = () => { 
+                conexionPerdida = true;
+                statusBadge.innerText = "Desconectado"; 
+                statusBadge.style.background = "red"; 
+                setTimeout(conectarWS, 1500); 
+            };
 
             const enviar = () => {
                 if(inputPrompt.value.trim() || currentImageBase64) {
