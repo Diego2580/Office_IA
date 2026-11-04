@@ -33,7 +33,7 @@ def procesar_agente(rol, state, llm, prompt):
 
 def nodo_arq(state):
     print("\n[ARQ]: Evaluando y Enrutando...")
-    notificar("Orquestador", "Enrutador Dinamico", "Decidiendo flujo")
+    notificar("ARQ", "Enrutador", "Decidiendo flujo")
     prompt = """Eres el Arquitecto Supervisor. Analiza la petición del usuario.
     Si requiere diseño/colores/frontend, empieza tu respuesta EXACTAMENTE con [RUTA: UI].
     Si requiere solo código lógico/backend, empieza con [RUTA: DEV].
@@ -47,7 +47,7 @@ def enrutador(state):
     if "[RUTA: UI]" in ultimo_mensaje: return "UI"
     if "[RUTA: DEV]" in ultimo_mensaje: return "DEV"
     if "[RUTA: SEC]" in ultimo_mensaje: return "SEC"
-    return "DEV" # Fallback por defecto
+    return "DEV"
 
 def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX.")
 def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. Escribe código.")
@@ -74,7 +74,6 @@ flujo.add_node("QA", nodo_qa)
 flujo.add_node("SEC", nodo_sec)
 flujo.add_node("herramientas", ToolNode(herramientas))
 
-# ARQUITECTURA DE ENRUTAMIENTO DINÁMICO
 flujo.add_edge(START, "ARQ")
 flujo.add_conditional_edges("ARQ", enrutador, {"UI": "UI", "DEV": "DEV", "SEC": "SEC"})
 flujo.add_edge("UI", "DEV")
@@ -90,9 +89,11 @@ if __name__ == '__main__':
         try:
             with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
                 print(" -> Escuchando en localhost:8030...")
+                notificar("ARQ", "Sistema en linea", "Esperando tu orden")
                 while True:
                     data = json.loads(ws.recv())
                     if data.get("origen") == "usuario":
                         for salida in app.stream({"messages": [HumanMessage(content=data["texto"])]}):
                             if "herramientas" in salida: print(f"  [SO]: {salida['herramientas']['messages'][-1].content}")
+                        notificar("ARQ", "Tarea finalizada", "Listo para la siguiente orden")
         except: time.sleep(3)
