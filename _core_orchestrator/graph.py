@@ -30,15 +30,15 @@ def notificar_ui(agente: str, accion: str, estado: str):
     try:
         with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
             ws.send(json.dumps({"agente": agente, "accion": accion, "estado": estado}))
-        time.sleep(0.6)
+        time.sleep(0.5)
     except:
         pass
 
 def nodo_arquitecto(state: EstadoOficina):
-    print("\n[Arquitecto]: Diseñando arquitectura y delegando...")
-    notificar_ui("Orquestador", "Diseñando arquitectura", "Estructurando tareas")
+    print("\n[Arquitecto]: Disenando arquitectura y delegando...")
+    notificar_ui("Orquestador", "Disenando arquitectura", "Estructurando tareas")
     instruccion = SystemMessage(
-        content="Eres el Arquitecto Líder. Delega las instrucciones a Claude. Usa herramientas si es necesario."
+        content="Eres el Arquitecto Lider. Delega las instrucciones a Claude. Usa herramientas si es necesario."
     )
     respuesta = arquitecto_llm.invoke([instruccion] + state['messages'])
     notificar_ui("Orquestador", "Plan entregado", "Delegando a Claude")
@@ -46,7 +46,7 @@ def nodo_arquitecto(state: EstadoOficina):
 
 def nodo_desarrollador(state: EstadoOficina):
     print("\n[Desarrollador - Claude]: Ejecutando...")
-    notificar_ui("Desarrollador", "Recibiendo planos", "Escribiendo solución")
+    notificar_ui("Desarrollador", "Recibiendo planos", "Escribiendo solucion")
     instruccion = SystemMessage(content="Eres Claude. Invocas herramientas locales para cumplir la tarea.")
     
     mensajes_actuales = list(state['messages'])
@@ -54,8 +54,8 @@ def nodo_desarrollador(state: EstadoOficina):
         try:
             respuesta = desarrollador_con_herramientas.invoke([instruccion] + mensajes_actuales)
             if not respuesta.tool_calls:
-                notificar_ui("Desarrollador", f"Reintento {intento+1}", "Esperando función")
-                mensajes_actuales.extend([respuesta, HumanMessage(content="Obligatorio: Usa una función en disco.")])
+                notificar_ui("Desarrollador", f"Reintento {intento+1}", "Esperando funcion")
+                mensajes_actuales.extend([respuesta, HumanMessage(content="Obligatorio: Usa una funcion en disco.")])
                 continue
             notificar_ui("Desarrollador", "Herramienta activada", respuesta.tool_calls[0]['name'])
             return {"messages": [respuesta]}
@@ -65,7 +65,7 @@ def nodo_desarrollador(state: EstadoOficina):
                 continue
             break
             
-    print("  [CRÍTICO] Fallo. Arquitecto toma control...")
+    print("  [CRITICO] Fallo. Arquitecto toma control...")
     notificar_ui("Orquestador", "Failover", "Tomando teclado")
     arq_con_herramientas = arquitecto_llm.bind_tools(herramientas)
     respuesta_rescate = arq_con_herramientas.invoke([instruccion] + list(state['messages']) + [HumanMessage(content="SISTEMA: Asume el control.")])
@@ -83,14 +83,14 @@ oficina_app = flujo.compile()
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print(" 🚀 AI OFFICE ENGINE - MODO ESCUCHA WEB")
+    print(" AI OFFICE ENGINE - MODO ESCUCHA WEB ACTIVO")
     print("="*50)
     
     while True:
         try:
             with connect("ws://127.0.0.1:8000/ws/oficina") as ws_listener:
-                notificar_ui("Orquestador", "Sistema en línea", "Esperando órdenes de la Web")
-                print("  -> Conectado. Esperando tu orden desde el navegador en localhost:8030...")
+                notificar_ui("Orquestador", "Sistema en linea", "Esperando ordenes de la Web")
+                print("  -> Conectado a WebSocket. Esperando orden desde localhost:8030...")
                 
                 while True:
                     mensaje = ws_listener.recv()
@@ -99,7 +99,7 @@ if __name__ == '__main__':
                     if datos.get("origen") == "usuario":
                         prompt = datos.get("texto")
                         print(f"\n[Orden recibida de la UI]: {prompt}")
-                        notificar_ui("Orquestador", "Orden recibida", "Iniciando análisis")
+                        notificar_ui("Orquestador", "Orden recibida", "Iniciando analisis")
                         
                         inputs = {"messages": [HumanMessage(content=prompt)]}
                         for salida in oficina_app.stream(inputs):
