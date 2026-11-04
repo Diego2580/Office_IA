@@ -13,6 +13,7 @@ OPENROUTER_FREE_MODELS = [
     "nvidia/nemotron-3.5-super-vl:free",
     "xingchen-agi/xing4.0-29b-a4b:free"
 ]
+HEADERS = {"HTTP-Referer": "http://localhost", "X-Title": "AI Office Engine"}
 
 def obtener_modelos_gratuitos():
     try:
@@ -41,16 +42,20 @@ def obtener_arquitecto():
     modelos = obtener_modelos_gratuitos()
     for modelo in modelos:
         try:
+            print(f"  -> Probando Arquitecto con {modelo}...")
             llm = ChatOpenAI(
                 model=modelo,
                 api_key=os.getenv("OPENROUTER_API_KEY"),
                 base_url="https://openrouter.ai/api/v1",
-                temperature=0.2
+                temperature=0.2,
+                max_retries=2,
+                default_headers=HEADERS
             )
             llm.invoke("Responde 'ok'.")
             print(f"  [EXITO] Arquitecto de rescate en OpenRouter: {modelo}")
             return llm
-        except Exception:
+        except Exception as e:
+            print(f"  [FALLO] {modelo} rechazado. Motivo: {e}")
             continue
     raise Exception("Error crítico: Sin acceso a modelos en Google ni OpenRouter.")
 
@@ -64,11 +69,13 @@ def obtener_desarrollador():
                 model=modelo,
                 api_key=os.getenv("OPENROUTER_API_KEY"),
                 base_url="https://openrouter.ai/api/v1",
-                temperature=0.4
+                temperature=0.4,
+                max_retries=2,
+                default_headers=HEADERS
             )
             llm.invoke("Responde 'ok'.")
             print(f"  [EXITO] Desarrollador conectado usando: {modelo}")
             return llm
-        except Exception:
-            print(f"  [FALLO] {modelo} rechazado.")
+        except Exception as e:
+            print(f"  [FALLO] {modelo} rechazado. Motivo: {e}")
     raise Exception("Error crítico: Ningún modelo gratuito conectó.")
