@@ -5,14 +5,13 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
-# Forzar la recarga del archivo .env ignorando la caché de la terminal
 load_dotenv(override=True)
 
-GEMINI_FALLBACKS = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+GEMINI_FALLBACKS = ["gemini-1.5-pro", "gemini-1.5-flash"]
 OPENROUTER_FREE_MODELS = [
+    "qwen/qwen-2.5-coder-32b-instruct:free",
     "nvidia/nemotron-3.5-super-vl:free",
-    "xingchen-agi/xing4.0-29b-a4b:free",
-    "google/gemini-2.0-flash-exp:free"
+    "xingchen-agi/xing4.0-29b-a4b:free"
 ]
 
 def obtener_modelos_gratuitos():
