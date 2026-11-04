@@ -37,9 +37,13 @@ def notificar_ui(agente: str, accion: str, estado: str):
 def nodo_arquitecto(state: EstadoOficina):
     print("\n[Arquitecto]: Disenando arquitectura y delegando...")
     notificar_ui("Orquestador", "Disenando arquitectura", "Estructurando tareas")
+    
+    # Inyectamos la ruta exacta del proyecto al cerebro del Arquitecto
+    ruta_base = os.getcwd().replace('\\', '/')
     instruccion = SystemMessage(
-        content="Eres el Arquitecto Lider. Delega las instrucciones a Claude. Usa herramientas si es necesario."
+        content=f"Eres el Arquitecto Lider. La ruta raiz de este proyecto es: {ruta_base}. Delega las instrucciones a Claude exigiendo que use esta ruta absoluta al crear archivos."
     )
+    
     respuesta = arquitecto_llm.invoke([instruccion] + state['messages'])
     notificar_ui("Orquestador", "Plan entregado", "Delegando a Claude")
     return {"messages": [respuesta]}
@@ -47,7 +51,12 @@ def nodo_arquitecto(state: EstadoOficina):
 def nodo_desarrollador(state: EstadoOficina):
     print("\n[Desarrollador - Claude]: Ejecutando...")
     notificar_ui("Desarrollador", "Recibiendo planos", "Escribiendo solucion")
-    instruccion = SystemMessage(content="Eres Claude. Invocas herramientas locales para cumplir la tarea.")
+    
+    # Inyectamos la ruta exacta del proyecto al cerebro del Desarrollador
+    ruta_base = os.getcwd().replace('\\', '/')
+    instruccion = SystemMessage(
+        content=f"Eres Claude. La ruta de trabajo OBLIGATORIA es {ruta_base}. Para crear archivos, usa la herramienta 'escribir_archivo' concatenando esta ruta absoluta con el nombre del archivo."
+    )
     
     mensajes_actuales = list(state['messages'])
     for intento in range(3):
@@ -55,7 +64,7 @@ def nodo_desarrollador(state: EstadoOficina):
             respuesta = desarrollador_con_herramientas.invoke([instruccion] + mensajes_actuales)
             if not respuesta.tool_calls:
                 notificar_ui("Desarrollador", f"Reintento {intento+1}", "Esperando funcion")
-                mensajes_actuales.extend([respuesta, HumanMessage(content="Obligatorio: Usa una funcion en disco.")])
+                mensajes_actuales.extend([respuesta, HumanMessage(content="Obligatorio: Usa la funcion escribir_archivo con la ruta absoluta indicada.")])
                 continue
             notificar_ui("Desarrollador", "Herramienta activada", respuesta.tool_calls[0]['name'])
             return {"messages": [respuesta]}
@@ -68,7 +77,7 @@ def nodo_desarrollador(state: EstadoOficina):
     print("  [CRITICO] Fallo. Arquitecto toma control...")
     notificar_ui("Orquestador", "Failover", "Tomando teclado")
     arq_con_herramientas = arquitecto_llm.bind_tools(herramientas)
-    respuesta_rescate = arq_con_herramientas.invoke([instruccion] + list(state['messages']) + [HumanMessage(content="SISTEMA: Asume el control.")])
+    respuesta_rescate = arq_con_herramientas.invoke([instruccion] + list(state['messages']) + [HumanMessage(content="SISTEMA: Asume el control y usa escribir_archivo.")])
     return {"messages": [respuesta_rescate]}
 
 flujo = StateGraph(EstadoOficina)
