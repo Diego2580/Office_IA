@@ -2,31 +2,31 @@ import os
 from langchain_core.tools import tool
 
 @tool
-def leer_archivo(ruta_absoluta: str) -> str:
-    "`"`"Lee el contenido de un archivo en el disco duro local del usuario."`"`"
+def leer_archivo(ruta: str) -> str:
+    """Lee el contenido de un archivo local."""
     try:
-        with open(ruta_absoluta, 'r', encoding='utf-8') as f:
+        with open(ruta, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
-        return f"Error al leer: {str(e)}"
+        return f"Error leyendo: {e}"
 
 @tool
-def escribir_archivo(ruta_absoluta: str, contenido: str) -> str:
-    "`"`"Escribe o sobrescribe un archivo con código en el disco duro local."`"`"
+def escribir_archivo(ruta: str, contenido: str) -> str:
+    """Escribe contenido en disco y crea las carpetas necesarias si no existen."""
     try:
-        # Crea las carpetas intermedias si no existen
-        os.makedirs(os.path.dirname(ruta_absoluta), exist_ok=True)
-        with open(ruta_absoluta, 'w', encoding='utf-8') as f:
+        directorio = os.path.dirname(ruta)
+        if directorio:
+            os.makedirs(directorio, exist_ok=True)
+        with open(ruta, 'w', encoding='utf-8') as f:
             f.write(contenido)
-        return f"Éxito: Archivo guardado en {ruta_absoluta}"
+        return f"Éxito: Archivo guardado en {ruta}"
     except Exception as e:
-        return f"Error al escribir: {str(e)}"
+        return f"Error escribiendo: {e}"
 
 @tool
-def listar_directorio(ruta_absoluta: str) -> str:
-    "`"`"Lista los archivos y carpetas dentro de un directorio dado."`"`"
+def listar_directorio(ruta: str) -> str:
+    """Lista archivos de un directorio."""
     try:
-        elementos = os.listdir(ruta_absoluta)
-        return f"Contenido de {ruta_absoluta}:\n" + "\n".join(elementos)
+        return "\n".join(os.listdir(ruta))
     except Exception as e:
-        return f"Error al listar el directorio: {str(e)}"
+        return f"Error listando: {e}"
