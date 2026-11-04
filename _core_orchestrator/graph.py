@@ -1,11 +1,6 @@
-import sys
-import os
-import operator
-import json
-import time
+import sys, os, operator, json, time
 from typing import TypedDict, Annotated, Sequence
 from websockets.sync.client import connect
-
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -13,110 +8,91 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from main import obtener_arquitecto, obtener_desarrollador
 from tools import leer_archivo, escribir_archivo, listar_directorio
-from middleware import TokenMiddleware
 
-class EstadoOficina(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+class EstadoOficina(TypedDict): messages: Annotated[Sequence[BaseMessage], operator.add]
 
-arquitecto_llm = obtener_arquitecto()
-desarrollador_llm = obtener_desarrollador()
-middleware = TokenMiddleware()
-
+arq_llm = obtener_arquitecto()
+dev_llm = obtener_desarrollador()
 herramientas = [leer_archivo, escribir_archivo, listar_directorio]
-desarrollador_con_herramientas = desarrollador_llm.bind_tools(herramientas)
-nodo_herramientas = ToolNode(herramientas)
+sec_con_herramientas = dev_llm.bind_tools(herramientas)
 
-def notificar_ui(agente: str, accion: str, estado: str):
+def notificar(agente, accion, estado):
     try:
         with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
             ws.send(json.dumps({"agente": agente, "accion": accion, "estado": estado}))
         time.sleep(0.5)
-    except:
-        pass
+    except: pass
 
-def nodo_arquitecto(state: EstadoOficina):
-    print("\n[Arquitecto]: Disenando arquitectura y delegando...")
-    notificar_ui("Orquestador", "Disenando arquitectura", "Estructurando tareas")
-    
-    # Inyectamos la ruta exacta del proyecto al cerebro del Arquitecto
-    ruta_base = os.getcwd().replace('\\', '/')
-    instruccion = SystemMessage(
-        content=f"Eres el Arquitecto Lider. La ruta raiz de este proyecto es: {ruta_base}. Delega las instrucciones a Claude exigiendo que use esta ruta absoluta al crear archivos."
-    )
-    
-    respuesta = arquitecto_llm.invoke([instruccion] + state['messages'])
-    notificar_ui("Orquestador", "Plan entregado", "Delegando a Claude")
-    return {"messages": [respuesta]}
+def procesar_agente(rol, state, llm, prompt):
+    print(f"\n[{rol}]: Operando...")
+    notificar(rol, "Analizando", "Procesando")
+    ruta = os.getcwd().replace('\\', '/')
+    res = llm.invoke([SystemMessage(content=f"{prompt} Ruta base: {ruta}")] + state['messages'])
+    notificar(rol, "Terminado", "Avanzando")
+    return {"messages": [res]}
 
-def nodo_desarrollador(state: EstadoOficina):
-    print("\n[Desarrollador - Claude]: Ejecutando...")
-    notificar_ui("Desarrollador", "Recibiendo planos", "Escribiendo solucion")
-    
-    # Inyectamos la ruta exacta del proyecto al cerebro del Desarrollador
-    ruta_base = os.getcwd().replace('\\', '/')
-    instruccion = SystemMessage(
-        content=f"Eres Claude. La ruta de trabajo OBLIGATORIA es {ruta_base}. Para crear archivos, usa la herramienta 'escribir_archivo' concatenando esta ruta absoluta con el nombre del archivo."
-    )
-    
-    mensajes_actuales = list(state['messages'])
-    for intento in range(3):
-        try:
-            respuesta = desarrollador_con_herramientas.invoke([instruccion] + mensajes_actuales)
-            if not respuesta.tool_calls:
-                notificar_ui("Desarrollador", f"Reintento {intento+1}", "Esperando funcion")
-                mensajes_actuales.extend([respuesta, HumanMessage(content="Obligatorio: Usa la funcion escribir_archivo con la ruta absoluta indicada.")])
-                continue
-            notificar_ui("Desarrollador", "Herramienta activada", respuesta.tool_calls[0]['name'])
-            return {"messages": [respuesta]}
-        except Exception as e:
-            if middleware.manejar_error_api(str(e)):
-                notificar_ui("Desarrollador", "Pausa", "Enfriamiento de cuota")
-                continue
-            break
-            
-    print("  [CRITICO] Fallo. Arquitecto toma control...")
-    notificar_ui("Orquestador", "Failover", "Tomando teclado")
-    arq_con_herramientas = arquitecto_llm.bind_tools(herramientas)
-    respuesta_rescate = arq_con_herramientas.invoke([instruccion] + list(state['messages']) + [HumanMessage(content="SISTEMA: Asume el control y usa escribir_archivo.")])
-    return {"messages": [respuesta_rescate]}
+def nodo_arq(state):
+    print("\n[ARQ]: Evaluando y Enrutando...")
+    notificar("Orquestador", "Enrutador Dinamico", "Decidiendo flujo")
+    prompt = """Eres el Arquitecto Supervisor. Analiza la petición del usuario.
+    Si requiere diseño/colores/frontend, empieza tu respuesta EXACTAMENTE con [RUTA: UI].
+    Si requiere solo código lógico/backend, empieza con [RUTA: DEV].
+    Si es solo guardar un texto o archivo simple, empieza con [RUTA: SEC].
+    Luego explica brevemente tu plan."""
+    res = arq_llm.invoke([SystemMessage(content=prompt)] + state['messages'])
+    return {"messages": [res]}
+
+def enrutador(state):
+    ultimo_mensaje = state['messages'][-1].content.upper()
+    if "[RUTA: UI]" in ultimo_mensaje: return "UI"
+    if "[RUTA: DEV]" in ultimo_mensaje: return "DEV"
+    if "[RUTA: SEC]" in ultimo_mensaje: return "SEC"
+    return "DEV" # Fallback por defecto
+
+def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Eres Diseñador UI/UX.")
+def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Desarrollador. Escribe código.")
+def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "Eres QA. Busca bugs, no uses herramientas.")
+
+def nodo_sec(state):
+    print("\n[SEC]: Verificando y guardando...")
+    notificar("SEC", "Auditoria", "Guardando a disco")
+    instruccion = SystemMessage(content=f"Eres DevSecOps. OBLIGATORIO: Usa 'escribir_archivo' con ruta absoluta ({os.getcwd()}) para crear el archivo solicitado.")
+    mensajes = list(state['messages'])
+    for _ in range(3):
+        res = sec_con_herramientas.invoke([instruccion] + mensajes)
+        if res.tool_calls:
+            notificar("SEC", "Herramienta", res.tool_calls[0]['name'])
+            return {"messages": [res]}
+        mensajes.extend([res, HumanMessage(content="Usa escribir_archivo ahora.")])
+    return {"messages": [arq_llm.bind_tools(herramientas).invoke([instruccion] + state['messages'])]}
 
 flujo = StateGraph(EstadoOficina)
-flujo.add_node("arquitecto", nodo_arquitecto)
-flujo.add_node("desarrollador", nodo_desarrollador)
-flujo.add_node("herramientas", nodo_herramientas)
-flujo.add_edge(START, "arquitecto")
-flujo.add_edge("arquitecto", "desarrollador")
-flujo.add_conditional_edges("desarrollador", tools_condition, {"tools": "herramientas", END: END})
+flujo.add_node("ARQ", nodo_arq)
+flujo.add_node("UI", nodo_ui)
+flujo.add_node("DEV", nodo_dev)
+flujo.add_node("QA", nodo_qa)
+flujo.add_node("SEC", nodo_sec)
+flujo.add_node("herramientas", ToolNode(herramientas))
+
+# ARQUITECTURA DE ENRUTAMIENTO DINÁMICO
+flujo.add_edge(START, "ARQ")
+flujo.add_conditional_edges("ARQ", enrutador, {"UI": "UI", "DEV": "DEV", "SEC": "SEC"})
+flujo.add_edge("UI", "DEV")
+flujo.add_edge("DEV", "QA")
+flujo.add_edge("QA", "SEC")
+flujo.add_conditional_edges("SEC", tools_condition, {"tools": "herramientas", END: END})
 flujo.add_edge("herramientas", END)
-oficina_app = flujo.compile()
+
+app = flujo.compile()
 
 if __name__ == '__main__':
-    print("\n" + "="*50)
-    print(" AI OFFICE ENGINE - MODO ESCUCHA WEB ACTIVO")
-    print("="*50)
-    
     while True:
         try:
-            with connect("ws://127.0.0.1:8000/ws/oficina") as ws_listener:
-                notificar_ui("Orquestador", "Sistema en linea", "Esperando ordenes de la Web")
-                print("  -> Conectado a WebSocket. Esperando orden desde localhost:8030...")
-                
+            with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
+                print(" -> Escuchando en localhost:8030...")
                 while True:
-                    mensaje = ws_listener.recv()
-                    datos = json.loads(mensaje)
-                    
-                    if datos.get("origen") == "usuario":
-                        prompt = datos.get("texto")
-                        print(f"\n[Orden recibida de la UI]: {prompt}")
-                        notificar_ui("Orquestador", "Orden recibida", "Iniciando analisis")
-                        
-                        inputs = {"messages": [HumanMessage(content=prompt)]}
-                        for salida in oficina_app.stream(inputs):
-                            for nodo, datos_salida in salida.items():
-                                if nodo == "herramientas":
-                                    print(f"\n[Sistema Operativo]: {datos_salida['messages'][-1].content}")
-                                    notificar_ui("Orquestador", "Disco local", "Completado")
-                        print("\n[OK] Tarea completada. Esperando nueva orden...")
-        except Exception as e:
-            print(f"  [Desconectado] Reconectando en 3s... ({e})")
-            time.sleep(3)
+                    data = json.loads(ws.recv())
+                    if data.get("origen") == "usuario":
+                        for salida in app.stream({"messages": [HumanMessage(content=data["texto"])]}):
+                            if "herramientas" in salida: print(f"  [SO]: {salida['herramientas']['messages'][-1].content}")
+        except: time.sleep(3)
