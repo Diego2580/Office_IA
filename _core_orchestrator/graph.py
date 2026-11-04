@@ -53,17 +53,53 @@ def enrutador(state):
     return "SEC"
 
 def nodo_ui(state): return procesar_agente("UI", state, dev_llm, "Diseñador UI/UX experto en Vibecoding. Si te pasan imagen, clónala pixel-perfect en código moderno.")
-def nodo_dev(state): return procesar_agente("DEV", state, dev_llm, "Eres Claude, el Desarrollador FullStack. Escribe código completo y funcional en bloques ```lenguaje ... ```. Usa herramientas web si hay URLs.")
+
+def nodo_dev(state):
+    print("\n[DEV]: Operando...")
+    notificar("DEV", "Analizando", "Vibecoding...")
+    mensajes_estado = list(state['messages'])
+    
+    # [HACK DEV] Ejecución automática de scraping para eludir límites de modelos free
+    prompt_usuario = mensajes_estado[0].content
+    texto_prompt = ""
+    if isinstance(prompt_usuario, list):
+        for item in prompt_usuario:
+            if isinstance(item, dict) and item.get("type") == "text":
+                texto_prompt = item.get("text", "")
+                break
+    else:
+        texto_prompt = str(prompt_usuario)
+        
+    urls = re.findall(r'https?://[^\s]+', texto_prompt)
+    if urls and not any("Código fuente extraído" in str(m.content) for m in mensajes_estado):
+        notificar("DEV", "Scraping", "Leyendo web...")
+        try:
+            codigo_web = explorar_web.invoke({"url": urls[0]})
+            mensajes_estado.append(SystemMessage(content=f"Código fuente extraído de {urls[0]}:\n{codigo_web}\n\nOBLIGATORIO: Analiza esta estructura y escribe el código para replicarla visualmente. Escribe todo tu código final en un solo bloque ```html ... ```"))
+        except Exception as e:
+            mensajes_estado.append(SystemMessage(content=f"Error leyendo web: {e}"))
+
+    prompt_sistema = f"Eres Claude, el Desarrollador FullStack. Ruta base: {os.getcwd()}. OBLIGATORIO: Encapsula siempre tu código fuente en bloques con triple comilla invertida."
+    mensajes_estado.insert(0, SystemMessage(content=prompt_sistema))
+    
+    for intento in range(3):
+        try:
+            res = dev_llm.invoke(mensajes_estado)
+            notificar("DEV", "Terminado", "Listo")
+            time.sleep(1)
+            return {"messages": [res]}
+        except Exception:
+            notificar("DEV", "Reintentando", "Esquivando red")
+            time.sleep(3)
+    return {"messages": [AIMessage(content="Error API.")]}
+
 def nodo_qa(state): return procesar_agente("QA", state, dev_llm, "QA rapido. Aprueba con 'OK' o arregla el codigo si hay error obvio.")
 
 def auditar_secretos(codigo: str) -> tuple[str, bool]:
-    """Filtro DevSecOps continuo: Neutraliza API Keys expuestas."""
     encontrado = False
-    # Patrón OpenAI / OpenRouter / Anthropic (sk-...)
     if re.search(r'sk-[a-zA-Z0-9_-]{20,}', codigo):
         codigo = re.sub(r'sk-[a-zA-Z0-9_-]{20,}', 'os.getenv("API_KEY_PROTEGIDA")', codigo)
         encontrado = True
-    # Patrón Google Gemini (AIza...)
     if re.search(r'AIza[a-zA-Z0-9_-]{35}', codigo):
         codigo = re.sub(r'AIza[a-zA-Z0-9_-]{35}', 'os.getenv("GEMINI_KEY_PROTEGIDA")', codigo)
         encontrado = True
@@ -90,17 +126,13 @@ def nodo_sec(state):
         else:
             codigo_final = ""
             for msg in reversed(state['messages']):
-                bloque = re.search(r'```[a-z]*\n(.*?)```', msg.content if isinstance(msg.content, str) else "", re.DOTALL | re.IGNORECASE)
+                bloque = re.search(r'```(?:html|css|js|javascript|python)?\s*(.*?)```', msg.content if isinstance(msg.content, str) else str(msg.content), re.DOTALL | re.IGNORECASE)
                 if bloque:
                     codigo_final = bloque.group(1).strip()
                     break
             if codigo_final:
-                # [DEVSECOPS]: Escaneo e intercepción
                 codigo_seguro, interceptado = auditar_secretos(codigo_final)
-                if interceptado:
-                    notificar("SEC", "Alerta", "Secreto neutralizado")
-                    print("  [SEC-ALERT] Se detectó y bloqueó una API Key en el código generado por Claude.")
-                    
+                if interceptado: print("  [SEC-ALERT] Se detectó y bloqueó una API Key.")
                 llamadas.append({"name": "escribir_archivo", "args": {"ruta": ruta_final, "contenido": codigo_seguro}, "id": "hk_w"})
                 if "abre" in prompt_usuario: llamadas.append({"name": "abrir_archivo", "args": {"ruta": ruta_final}, "id": "hk_o2"})
         res = AIMessage(content="Vibecoding Action", tool_calls=llamadas)
@@ -118,7 +150,7 @@ if __name__ == '__main__':
     while True:
         try:
             with connect("ws://127.0.0.1:8000/ws/oficina") as ws:
-                print(" -> Agencia Vibecoding Lista con DevSecOps Activo...")
+                print(" -> Agencia Vibecoding Lista con Web Scraper Automático...")
                 while True:
                     data = json.loads(ws.recv())
                     if data.get("origen") == "usuario":
