@@ -33,7 +33,7 @@
     <script>
         const logPanel = document.getElementById('log-panel'), inputPrompt = document.getElementById('prompt-input'), statusBadge = document.getElementById('connection-status');
         
-        function log(msg, color="#00ff00") { logPanel.innerHTML += <div style="color:">> </div>; logPanel.scrollTop = logPanel.scrollHeight; }
+        function log(msg, color="#00ff00") { logPanel.innerHTML += `<div style="color:${color}">> ${msg}</div>`; logPanel.scrollTop = logPanel.scrollHeight; }
         
         function conectarWS() {
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/oficina");
@@ -47,7 +47,7 @@
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.origen === "usuario") return;
-                log([]:  - );
+                log(`[${data.agente}]: ${data.accion} - ${data.estado}`);
                 let el = document.getElementById('agente-' + data.agente);
                 if (el) { el.style.transform = "translateY(-20px)"; setTimeout(() => el.style.transform = "translateY(0)", 300); }
             };
